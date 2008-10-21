@@ -30,12 +30,13 @@ class EventMachine::MemcacheClient < EM::Connection
   
   def receive_line(line)
     if @multiline || (@queue.size>0 && @queue.first.multiline && line=='END')
-      if line=='END'
-        cmd, task, params = @multiline || ['value', @queue.shift, nil]
-        send("#{cmd}_handler", task, params, @data)
-        @multiline = @data = nil, ""
+      @multiline ||= ['value', @queue.shift, [0]]
+      if line=='END' && (@data.size >= @multiline[2][2].to_i)
+        cmd, task, params = @multiline
+        send("#{cmd}_handler", task, params, @data[0, @multiline[2][2].to_i])
+        @multiline, @data = nil, ""
       else
-        @data << line
+        @data << "#{line}\r\n"
       end
       
     elsif @queue.size>0
@@ -65,6 +66,7 @@ class EventMachine::MemcacheClient < EM::Connection
   def post_init
     @data = ""
     @queue, @multiline = [], nil
+    set_delimiter "\r\n"
   end
 end
 
@@ -92,20 +94,57 @@ class EventMachine::MemcacheClient < EM::Connection
 end
 
 if $0 == __FILE__
+  $index = 0
   EventMachine::run {
     EventMachine::MemcacheClient.connection_pool
-    EventMachine::add_timer 1, proc {
+    
+    $index += 1
+    EventMachine::add_timer $index, proc {
       EventMachine::MemcacheClient.delete('foo') do
         puts "deleted foo"
       end
     }
-    EventMachine::add_timer 2, proc {
+    
+    $index += 1
+    EventMachine::add_timer $index, proc {
       EventMachine::MemcacheClient.get('foo') do |value|
         print "nil => "
         p value
       end
     }
-    EventMachine::add_timer 3, proc {
+    
+    $index += 1
+    EventMachine::add_timer $index, proc {
+      EventMachine::MemcacheClient.set('foo', "END\r\n", :raw => true) do 
+        EventMachine::MemcacheClient.get('foo', :raw => true) do |value|
+          print '"END\r\n" => '
+          p value
+        end
+      end
+    }
+    
+    $index += 1
+    EventMachine::add_timer $index, proc {
+      EventMachine::MemcacheClient.set('foo', "\r\r\n", :raw => true) do 
+        EventMachine::MemcacheClient.get('foo', :raw => true) do |value|
+          print '"\r\r\n" => '
+          p value
+        end
+      end
+    }
+    
+    $index += 1
+    EventMachine::add_timer $index, proc {
+      EventMachine::MemcacheClient.set('foo', "\r\r\n\n", :raw => true) do 
+        EventMachine::MemcacheClient.get('foo', :raw => true) do |value|
+          print '"\r\r\n\n" => '
+          p value
+        end
+      end
+    }
+    
+    $index += 1
+    EventMachine::add_timer $index, proc {
       EventMachine::MemcacheClient.set('foo', [1,2]) do 
         EventMachine::MemcacheClient.get('foo') do |value|
           print "[1,2] => "
