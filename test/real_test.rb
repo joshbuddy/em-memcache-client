@@ -127,4 +127,35 @@ class ConnectToRealServer < Test::Unit::TestCase
     assert_equal nil, $foo_value
     assert_equal nil, $bar_value
   end
+
+  def test_delete_and_delete
+    $foo_value = "wrong way"
+    $bar_value = "wrong way"
+    $deleted_foo_1st = nil
+    $deleted_foo_2nd = nil
+    EventMachine::run {
+      EventMachine::MemcacheClient.set('bar',"BAR5") do 
+        EventMachine::MemcacheClient.set('foo',"FOO5") do 
+          EventMachine::MemcacheClient.delete("foo") do |deleted_foo_1st|
+            $deleted_foo_1st = deleted_foo_1st
+            EventMachine::MemcacheClient.delete("foo") do |deleted_foo_2nd|
+              $deleted_foo_2nd = deleted_foo_2nd
+              EventMachine::MemcacheClient.get('foo') do |value|
+                $foo_value = value
+                EventMachine::MemcacheClient.get('bar') do |value|
+                  $bar_value = value
+                  EventMachine.stop
+                end
+              end
+            end
+          end
+        end
+      end
+    }
+    assert_equal nil, $foo_value
+    assert_equal "BAR5", $bar_value
+    assert $deleted_foo_1st
+    assert !$deleted_foo_2nd
+  end
+
 end

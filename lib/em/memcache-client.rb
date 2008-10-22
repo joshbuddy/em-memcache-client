@@ -68,9 +68,15 @@ class EventMachine::MemcacheClient < EM::Connection
     send_cmd Task.new(query, ['stored', 'not_stored', 'exists', 'not_found'], options, block) if block
   end
   
-  %w[ stored not_found deleted ok ].each do |type| class_eval %[
+  %w[ stored deleted ok ].each do |type| class_eval %[
   def #{type}_handler(task, params)
-    task.callback.call if task.callback
+    task.callback.call(true) if task.callback
+  end
+  ] end
+
+  %w[ not_found ].each do |type| class_eval %[
+  def #{type}_handler(task, params)
+    task.callback.call(false) if task.callback
   end
   ] end
 
