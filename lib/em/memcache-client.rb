@@ -131,14 +131,3 @@ class EventMachine::MemcacheClient < EM::Connection
     @connection_pool ||= (1..settings[:connections]).map{ EM::connect(settings[:host], settings[:port], self) }
   end
 end
-
-if $0 == __FILE__
-  EventMachine::run {
-    EventMachine::MemcacheClient.set('foo', "END\r\n", :raw => true) do 
-      EventMachine::MemcacheClient.get('foo', :raw => true) do |value|
-        print '"END\r\n" => '
-        p value
-      end
-    end
-  }
-end
