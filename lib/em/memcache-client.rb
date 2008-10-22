@@ -1,9 +1,8 @@
 require 'eventmachine'
-require 'strscan'
 
 class EventMachine::MemcacheClient < EM::Connection
   include EM::Protocols::LineText2
-  Task = Struct.new(:accepts, :options, :callback, :multiline)
+  Task = Struct.new(:query, :accepts, :options, :callback, :multiline)
   
   def set(key, value, options={}, &block)
     send_store_cmd('set', key, value, options, &block)
@@ -11,21 +10,23 @@ class EventMachine::MemcacheClient < EM::Connection
 
   def get(key, options={}, &block)
     query = "get #{key}"
-    task = Task.new(['value'], options, block, true)
-    send_cmd query, task
+    task = Task.new(query, ['value'], options, block, true)
+    send_cmd task
   end
   
   def delete(key, options={}, &block)
     query = "delete #{key}#{block ? nil : ' noreply'}"
-    task = Task.new(['deleted','not_found'], options, block) if block
-    send_cmd query, task
+    task = Task.new(query, (block ? ['deleted','not_found'] : nil), options, block) 
+    send_cmd task
   end
   
   def flush_all(&block)
     query = "flush_all#{block ? nil : ' noreply'}"
-    task = Task.new(['ok'], {}, block) if block
-    send_cmd query, task
+    task = Task.new(query, (block ? ['ok'] : nil), {}, block)
+    send_cmd task
   end
+  
+  private
   
   def receive_line(line)
     if @multiline || (@queue.size>0 && @queue.first.multiline && line=='END')
@@ -52,30 +53,19 @@ class EventMachine::MemcacheClient < EM::Connection
     end
   end
   
-  def connection_completed
-    @connected = true
-    next_task
-  end
-  
-  def unbind
-    @connected = false
-    reconnect self.class.settings[:host], self.class.settings[:port]
-  end
-  
-  private
-  def send_cmd(query, task)
+  def send_cmd(task)
     if @connected
-      send_data "#{query}\r\n"
-      @queue << task
+      send_data "#{task.query}\r\n"
+      @queue << task if task.accepts
     else
-      @pending << [query, task]
+      @pending << task
     end
   end
   
   def send_store_cmd(cmd, key, value, options, &block)
     value = Marshal.dump(value) unless options[:raw]
     query = "#{cmd} #{key} #{options[:flags] || 0} #{options[:expire] || 0} #{value.size}#{block ? nil : ' noreply'}\r\n#{value}"
-    send_cmd query, Task.new(['stored', 'not_stored', 'exists', 'not_found'], options, block) if block
+    send_cmd Task.new(query, ['stored', 'not_stored', 'exists', 'not_found'], options, block) if block
   end
   
   %w[ stored not_found deleted ok ].each do |type| class_eval %[
@@ -88,6 +78,13 @@ class EventMachine::MemcacheClient < EM::Connection
     task.callback.call(task.options[:raw] ? data : (data=="" ? nil : Marshal.load(data)))
   end
 
+  def next_task
+    if @connected and pending_task = @pending.shift
+      send_cmd pending_task
+    end
+  end
+  
+  # EM::Connection event
   def post_init
     set_delimiter "\r\n"
     @data = ""
@@ -95,12 +92,22 @@ class EventMachine::MemcacheClient < EM::Connection
     @connected = false
   end
   
-  def next_task
-    if @connected and pending = @pending.shift
-      query, task = pending
-      send_cmd query, task
-    end
+  public
+  
+  # EM::Connection event
+  def connection_completed
+    @connected = true
+    next_task
   end
+  
+  # unbind and auto recconect
+  # EM::Connection event
+  def unbind
+    @connected = false
+    reconnect self.class.settings[:host], self.class.settings[:port]
+  end
+  
+  
 end
 
 class EventMachine::MemcacheClient < EM::Connection
