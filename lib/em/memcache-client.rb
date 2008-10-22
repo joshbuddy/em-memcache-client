@@ -106,8 +106,6 @@ class EventMachine::MemcacheClient < EM::Connection
     @connected = false
     reconnect self.class.settings[:host], self.class.settings[:port]
   end
-  
-  
 end
 
 class EventMachine::MemcacheClient < EM::Connection
@@ -121,9 +119,21 @@ class EventMachine::MemcacheClient < EM::Connection
     @settings ||= { :host => 'localhost', :port => 11211, :connections => 4, :logging => false }
   end
 
-  %w[ get set delete flush_all].each do |type| class_eval %[
+  %w[ get set delete flush_all ].each do |type| class_eval %[
     def self.#{type}(*args, &block)
         connection.send("#{type}",*args, &block)
+    end
+  ] end
+  
+  %w[ flush_all ].each do |type| class_eval %[
+    def self.#{type}(*args, &block)
+      responses = 0
+      connection_pool.each do |conn|
+        conn.send("#{type}",*args) do
+          responses += 1
+          block.call if block and responses == @connection_pool.size
+        end
+      end
     end
   ] end
 
